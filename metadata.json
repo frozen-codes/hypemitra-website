@@ -1,0 +1,6 @@
+{
+  "name": "WorkTrack & Profit - Agency Operations",
+  "description": "Calendar-first daily work tracking, brand deal revenue, creator deliverables, and profit management dashboard for HR and Senior leadership.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
