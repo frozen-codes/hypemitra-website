@@ -10,6 +10,8 @@ import {
   User as UserIcon,
   RotateCcw,
 } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
+import { NetworkStatusBadge } from './OfflineIndicator';
 
 interface NavbarProps {
   currentUser: User;
@@ -60,8 +62,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Right Action Icons: User Avatar Circle + Logout */}
-          <div className="flex items-center gap-2">
+          {/* Right Action Icons: Network Status + PWA Install + User Avatar + Logout */}
+          <div className="flex items-center gap-2.5">
+            <NetworkStatusBadge />
+            <PWAInstallButton variant="compact" />
+
             <button
               onClick={onOpenEditProfile}
               title={`Logged in as ${currentUser.name} (${currentUser.role.toUpperCase()}) - Click to edit profile`}

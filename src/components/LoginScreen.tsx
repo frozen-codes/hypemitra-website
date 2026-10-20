@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { api } from '../services/api';
 import { Lock, Mail, ShieldCheck, UserCheck, AlertCircle } from 'lucide-react';
+import { PWAInstallButton } from './PWAInstallButton';
+import { OfflineIndicator, NetworkStatusBadge } from './OfflineIndicator';
 
 interface LoginScreenProps {
   onLoginSuccess: (user: User) => void;
@@ -174,10 +176,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </div>
         </div>
 
-        <p className="mt-4 text-center text-xs text-neutral-500">
+        <div className="mt-5 flex items-center justify-center gap-3">
+          <NetworkStatusBadge />
+          <PWAInstallButton variant="compact" />
+        </div>
+
+        <p className="mt-3 text-center text-xs text-neutral-500">
           Private internal agency tool · Shared permanent database
         </p>
       </div>
+
+      <OfflineIndicator />
     </div>
   );
 };

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="hm-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" />
+      <stop offset="100%" stop-color="#1E293B" />
+    </linearGradient>
+    <linearGradient id="hm-accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#8B5CF6" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#hm-grad)" />
+  <circle cx="256" cy="256" r="180" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="8" />
+  <!-- H letter mark -->
+  <path d="M 170 170 L 170 342" stroke="white" stroke-width="32" stroke-linecap="round" />
+  <path d="M 342 170 L 342 342" stroke="white" stroke-width="32" stroke-linecap="round" />
+  <path d="M 170 256 L 342 256" stroke="url(#hm-accent)" stroke-width="32" stroke-linecap="round" />
+  <!-- subtle glow dot -->
+  <circle cx="342" cy="170" r="14" fill="#38BDF8" />
+</svg>

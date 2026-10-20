@@ -300,11 +300,12 @@ export const DealModal: React.FC<DealModalProps> = ({
               <select
                 value={status}
                 onChange={(e: any) => setStatus(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-neutral-300 rounded-lg bg-white"
+                className="w-full px-3 py-2 text-xs border border-neutral-300 rounded-lg bg-white font-medium"
               >
-                <option value="lead">Lead / Pitching</option>
-                <option value="in-progress">In Progress</option>
+                <option value="locked">Locked (Confirmed Deal)</option>
                 <option value="completed">Completed & Wrapped</option>
+                <option value="in-progress">In Progress</option>
+                <option value="lead">Lead / Pitching</option>
                 <option value="on-hold">On Hold</option>
                 <option value="cancelled">Cancelled</option>
               </select>

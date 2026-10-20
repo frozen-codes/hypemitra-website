@@ -9,6 +9,7 @@ import { FinanceView } from './components/FinanceView';
 import { SearchExportView } from './components/SearchExportView';
 import { DealModal } from './components/DealModal';
 import { EditProfileModal } from './components/EditProfileModal';
+import { OfflineIndicator } from './components/OfflineIndicator';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => api.getStoredUser());
@@ -249,6 +250,7 @@ export default function App() {
           <CalendarView
             currentUser={currentUser}
             dailyWork={db.dailyWork}
+            deals={db.deals}
             selectedDate={selectedDate}
             onSelectDate={handleSelectDate}
             onOpenCreateOrEdit={handleOpenCreateOrEdit}
@@ -260,6 +262,10 @@ export default function App() {
             currentUser={currentUser}
             deals={db.deals}
             weeklyTargets={db.weeklyTargets}
+            dailyWork={db.dailyWork}
+            selectedDate={selectedDate}
+            onSelectDate={handleSelectDate}
+            onOpenDailyDrawer={handleOpenCreateOrEdit}
             onBackToCalendar={() => setActiveTab('calendar')}
             onOpenCreateDeal={handleOpenCreateDeal}
             onEditDeal={handleEditDeal}
@@ -325,6 +331,9 @@ export default function App() {
           <span>PostgreSQL & Supabase Ready</span>
         </div>
       </footer>
+
+      {/* Offline Connectivity & Sync Indicator */}
+      <OfflineIndicator />
     </div>
   );
 }
