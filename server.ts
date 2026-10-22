@@ -2,40 +2,56 @@ import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { INITIAL_DAILY_WORK, INITIAL_DEALS, INITIAL_WEEKLY_TARGETS, AUTHORIZED_USERS } from './src/data/initialData';
-import { AppDatabase, BrandDeal, DailyWorkEntry, WeeklyTarget } from './src/types';
+import {
+  INITIAL_PERFORMANCE,
+  INITIAL_BRAND_DEALS,
+  INITIAL_EXPENSES,
+} from './src/data/initialData';
+import {
+  AppDatabase,
+  BrandDealRecord,
+  CreatorRecord,
+  CreatorUploadingStatus,
+  CreatorPaymentStatus,
+  ExpenseRecord,
+  PerformanceDayEntry,
+} from './src/types';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-// AI Studio dev server strictly runs on port 3000
 const PORT = 3000;
 const DATA_DIR = path.resolve(__dirname, 'data');
 const DB_FILE = path.resolve(DATA_DIR, 'database.json');
 
-// Ensure data folder exists
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-// Database state in memory + atomic persistence to disk
 let db: AppDatabase;
 
 function loadDatabase(): AppDatabase {
   try {
     if (fs.existsSync(DB_FILE)) {
       const content = fs.readFileSync(DB_FILE, 'utf-8');
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+      if (parsed.brandDeals && parsed.performance) {
+        return {
+          performance: parsed.performance || INITIAL_PERFORMANCE,
+          brandDeals: parsed.brandDeals || INITIAL_BRAND_DEALS,
+          expenses: parsed.expenses || INITIAL_EXPENSES,
+        };
+      }
     }
   } catch (err) {
     console.error('Failed reading database file, initializing defaults:', err);
   }
 
   const initial: AppDatabase = {
-    dailyWork: INITIAL_DAILY_WORK,
-    deals: INITIAL_DEALS,
-    weeklyTargets: INITIAL_WEEKLY_TARGETS,
+    performance: INITIAL_PERFORMANCE,
+    brandDeals: INITIAL_BRAND_DEALS,
+    expenses: INITIAL_EXPENSES,
   };
   saveDatabase(initial);
   return initial;
@@ -53,200 +69,145 @@ db = loadDatabase();
 
 app.use(express.json());
 
-// Auth Login
-app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
-  }
-
-  const account = AUTHORIZED_USERS[email.trim().toLowerCase()];
-  if (!account || account.passwordHash !== password) {
-    return res.status(401).json({ error: 'Invalid credentials. Only HR and Senior accounts are permitted.' });
-  }
-
-  res.json({
-    user: account.user,
-    token: `token-${account.user.id}-${Date.now()}`,
-  });
-});
-
-// Update User Profile
-app.post('/api/auth/profile', (req: Request, res: Response) => {
-  const { id, name, title, email, avatar, newPassword } = req.body;
-  if (!id) {
-    return res.status(400).json({ error: 'User ID is required' });
-  }
-
-  const foundKey = Object.keys(AUTHORIZED_USERS).find((k) => AUTHORIZED_USERS[k].user.id === id);
-  if (!foundKey) {
-    return res.status(404).json({ error: 'User not found' });
-  }
-
-  const account = AUTHORIZED_USERS[foundKey];
-  if (name) account.user.name = name.trim();
-  if (title) account.user.title = title.trim();
-  if (avatar) account.user.avatar = avatar.trim();
-  if (newPassword && newPassword.trim()) {
-    account.passwordHash = newPassword.trim();
-  }
-
-  const updatedEmail = email ? email.trim().toLowerCase() : foundKey;
-  if (updatedEmail !== foundKey) {
-    account.user.email = updatedEmail;
-    delete AUTHORIZED_USERS[foundKey];
-    AUTHORIZED_USERS[updatedEmail] = account;
-  }
-
-  res.json({ success: true, user: account.user });
-});
-
-// Get all shared database records
+// Get all database records
 app.get('/api/data', (_req: Request, res: Response) => {
   res.json(db);
 });
 
-// Update or add daily work record (HR or Senior)
-app.post('/api/daily-work', (req: Request, res: Response) => {
-  const entry: DailyWorkEntry = req.body;
+// Update or add performance record for a date
+app.post('/api/performance', (req: Request, res: Response) => {
+  const entry: PerformanceDayEntry = req.body;
   if (!entry || !entry.date) {
-    return res.status(400).json({ error: 'Invalid daily work payload: date is required' });
+    return res.status(400).json({ error: 'Date is required for performance entry' });
   }
 
-  // Ensure submittedBy and lastEditorName are never null
-  entry.submittedBy = entry.submittedBy || entry.lastEditorName || 'Shraddha Tiwari';
-  entry.lastEditorName = entry.lastEditorName || entry.submittedBy || 'Shraddha Tiwari';
-  entry.lastModifiedAt = new Date().toISOString();
-
-  // Preserve existing senior review if not modified
-  const existing = db.dailyWork[entry.date];
-  if (existing?.seniorReview && !entry.seniorReview) {
-    entry.seniorReview = existing.seniorReview;
-  }
-
-  db.dailyWork[entry.date] = entry;
-  saveDatabase(db);
-  res.json({ success: true, entry });
-});
-
-// Senior Review on a daily work record
-app.post('/api/daily-work/review', (req: Request, res: Response) => {
-  const { date, feedback, status, reviewerName } = req.body;
-  if (!date) {
-    return res.status(400).json({ error: 'Date is required for review' });
-  }
-
-  const existing = db.dailyWork[date];
-  if (!existing) {
-    return res.status(404).json({ error: 'No daily work entry found for this date' });
-  }
-
-  existing.seniorReview = {
-    reviewed: true,
-    reviewedBy: reviewerName || 'David Vance (Senior Director)',
-    reviewedAt: new Date().toISOString(),
-    feedback: feedback || '',
-    status: status || 'approved',
-  };
-
-  db.dailyWork[date] = existing;
-  saveDatabase(db);
-  res.json({ success: true, entry: existing });
-});
-
-// Create or update a brand deal
-app.post('/api/deals', (req: Request, res: Response) => {
-  const dealData = req.body;
-  if (!dealData.brandName || !dealData.campaignName) {
-    return res.status(400).json({ error: 'Brand name and campaign name are required' });
-  }
-
-  const dealValue = Number(dealData.dealValue) || 0;
-  const brandRevenueReceived = Number(dealData.brandRevenueReceived) || 0;
-  const outstandingPayments = Math.max(0, dealValue - brandRevenueReceived);
-  const creatorPayments = Number(dealData.creatorPayments) || 0;
-  const additionalExpenses = Number(dealData.additionalExpenses) || 0;
-  const totalExpenses = creatorPayments + additionalExpenses;
-  const netProfit = brandRevenueReceived - totalExpenses;
-  const profitMargin = brandRevenueReceived > 0 
-    ? Math.round(((netProfit / brandRevenueReceived) * 100) * 100) / 100 
-    : 0;
-
-  const id = dealData.id || `deal-${Date.now()}`;
-  const updatedDeal: BrandDeal = {
-    id,
-    brandName: dealData.brandName.trim(),
-    campaignName: dealData.campaignName.trim(),
-    dealValue,
-    brandRevenueReceived,
-    outstandingPayments,
-    creatorPayments,
-    additionalExpenses,
-    totalExpenses,
-    netProfit,
-    profitMargin,
-    creatorsLocked: Number(dealData.creatorsLocked) || 0,
-    creatorsCompleted: Number(dealData.creatorsCompleted) || 0,
-    creatorsPending: Number(dealData.creatorsPending) || 0,
-    creatorsDeclined: Number(dealData.creatorsDeclined) || 0,
-    deadline: dealData.deadline || new Date().toISOString().split('T')[0],
-    status: dealData.status || 'in-progress',
-    notes: dealData.notes || '',
-    createdAt: dealData.createdAt || new Date().toISOString(),
+  const sanitized: PerformanceDayEntry = {
+    date: entry.date,
+    performanceRating: entry.performanceRating || 'green',
+    tasks: Array.isArray(entry.tasks) ? entry.tasks : [],
+    updates: entry.updates || '',
+    notes: entry.notes || '',
     updatedAt: new Date().toISOString(),
   };
 
-  const index = db.deals.findIndex((d) => d.id === id);
+  db.performance[entry.date] = sanitized;
+  saveDatabase(db);
+  res.json({ success: true, entry: sanitized });
+});
+
+// Create or update a brand deal (with multiple creators)
+app.post('/api/brand-deals', (req: Request, res: Response) => {
+  const data: Partial<BrandDealRecord> = req.body;
+  if (!data.brandName || !data.dealDate) {
+    return res.status(400).json({ error: 'Brand name and deal date are required' });
+  }
+
+  const totalDealAmount = Math.max(0, Number(data.totalDealAmount) || 0);
+  const amountReceived = Math.max(0, Number(data.amountReceived) || 0);
+
+  // Validate or infer payment status
+  let paymentStatus = data.paymentStatus;
+  if (!paymentStatus) {
+    if (amountReceived >= totalDealAmount && totalDealAmount > 0) {
+      paymentStatus = 'Paid';
+    } else if (amountReceived > 0) {
+      paymentStatus = 'Partially Paid';
+    } else {
+      paymentStatus = 'Pending';
+    }
+  }
+
+  const creators: CreatorRecord[] = Array.isArray(data.creators)
+    ? data.creators.map((c, idx) => ({
+        id: c.id || `c-${Date.now()}-${idx}`,
+        creatorName: (c.creatorName || '').trim() || 'Creator',
+        lockingAmount: Math.max(0, Number(c.lockingAmount) || 0),
+        payoutAmount: Math.max(0, Number(c.payoutAmount) || 0),
+        uploadingStatus: (c.uploadingStatus === 'Uploaded' ? 'Uploaded' : 'Pending') as CreatorUploadingStatus,
+        paymentStatus: (c.paymentStatus || 'Pending') as CreatorPaymentStatus,
+        amountPaid: Math.max(0, Number(c.amountPaid) || 0),
+      }))
+    : [];
+
+  const id = data.id || `deal-${Date.now()}`;
+  const updatedDeal: BrandDealRecord = {
+    id,
+    brandName: data.brandName.trim(),
+    dealDate: data.dealDate.trim(),
+    totalDealAmount,
+    amountReceived,
+    paymentStatus,
+    creators,
+    notes: data.notes || '',
+    createdAt: data.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  const index = db.brandDeals.findIndex((d) => d.id === id);
   if (index >= 0) {
-    db.deals[index] = updatedDeal;
+    db.brandDeals[index] = updatedDeal;
   } else {
-    db.deals.unshift(updatedDeal);
+    db.brandDeals.unshift(updatedDeal);
   }
 
   saveDatabase(db);
   res.json({ success: true, deal: updatedDeal });
 });
 
-// Delete a deal
-app.delete('/api/deals/:id', (req: Request, res: Response) => {
+// Delete a brand deal
+app.delete('/api/brand-deals/:id', (req: Request, res: Response) => {
   const { id } = req.params;
-  db.deals = db.deals.filter((d) => d.id !== id);
+  db.brandDeals = db.brandDeals.filter((d) => d.id !== id);
   saveDatabase(db);
   res.json({ success: true });
 });
 
-// Set or update weekly target
-app.post('/api/weekly-targets', (req: Request, res: Response) => {
-  const target: WeeklyTarget = req.body;
-  if (!target.id || !target.startDate || !target.endDate) {
-    return res.status(400).json({ error: 'Target ID, startDate and endDate are required' });
+// Create or update an expense
+app.post('/api/expenses', (req: Request, res: Response) => {
+  const data: Partial<ExpenseRecord> = req.body;
+  if (!data.date || !data.description) {
+    return res.status(400).json({ error: 'Date and description are required for expense' });
   }
 
-  db.weeklyTargets[target.id] = {
-    ...target,
-    targetRevenue: Number(target.targetRevenue) || 0,
-    targetProfit: Number(target.targetProfit) || 0,
-    targetCreatorsLocked: Number(target.targetCreatorsLocked) || 0,
-    targetDeliverables: Number(target.targetDeliverables) || 0,
-    updatedAt: new Date().toISOString(),
+  const id = data.id || `exp-${Date.now()}`;
+  const record: ExpenseRecord = {
+    id,
+    date: data.date.trim(),
+    description: data.description.trim(),
+    amount: Math.max(0, Number(data.amount) || 0),
+    createdAt: data.createdAt || new Date().toISOString(),
   };
 
+  const index = db.expenses.findIndex((e) => e.id === id);
+  if (index >= 0) {
+    db.expenses[index] = record;
+  } else {
+    db.expenses.unshift(record);
+  }
+
   saveDatabase(db);
-  res.json({ success: true, target: db.weeklyTargets[target.id] });
+  res.json({ success: true, expense: record });
 });
 
-// Reset database to initial seed
+// Delete an expense
+app.delete('/api/expenses/:id', (req: Request, res: Response) => {
+  const { id } = req.params;
+  db.expenses = db.expenses.filter((e) => e.id !== id);
+  saveDatabase(db);
+  res.json({ success: true });
+});
+
+// Reset database
 app.post('/api/reset-data', (_req: Request, res: Response) => {
   db = {
-    dailyWork: INITIAL_DAILY_WORK,
-    deals: INITIAL_DEALS,
-    weeklyTargets: INITIAL_WEEKLY_TARGETS,
+    performance: INITIAL_PERFORMANCE,
+    brandDeals: INITIAL_BRAND_DEALS,
+    expenses: INITIAL_EXPENSES,
   };
   saveDatabase(db);
   res.json({ success: true, db });
 });
 
-// Setup Vite middleware in dev or static files in production
 async function startServer() {
   const isProduction = process.env.NODE_ENV === 'production';
 
@@ -272,7 +233,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Agency WorkTrack Server running on http://0.0.0.0:${PORT}`);
+    console.log(`Creator Performance & Finance Server running on http://0.0.0.0:${PORT}`);
   });
 }
 

@@ -1,91 +1,57 @@
-export type UserRole = 'hr' | 'senior';
-
-export interface User {
-  id: string;
-  name: string;
-  email: string;
-  role: UserRole;
-  avatar: string;
-  title: string;
-}
-
 export type PerformanceRating = 'green' | 'yellow' | 'red';
 
-export interface DealHandledSummary {
-  dealId: string;
-  brandName: string;
-  campaignName: string;
-  updateSummary: string;
+export interface TaskItem {
+  id: string;
+  text: string;
+  completed?: boolean;
 }
 
-export interface SeniorReview {
-  reviewed: boolean;
-  reviewedBy?: string;
-  reviewedAt?: string;
-  feedback?: string;
-  status?: 'approved' | 'action_required' | 'acknowledged';
-}
-
-export interface DailyWorkEntry {
+export interface PerformanceDayEntry {
   date: string; // YYYY-MM-DD
-  tasksCompleted: string[];
-  tasksPending: string[];
-  notes: string;
-  creatorsContacted: number;
-  creatorsLocked: number;
-  deliverablesCompleted: number;
-  performanceRating: PerformanceRating;
-  dealsHandled: DealHandledSummary[];
-  submittedBy: string; // created_by_name
-  submittedAt: string;
-  lastEditorName?: string;
-  lastModifiedAt?: string;
-  seniorReview?: SeniorReview;
+  performanceRating: PerformanceRating; // 'green' = Best Work, 'yellow' = Average Work, 'red' = Poor Work
+  tasks: TaskItem[];
+  updates: string;
+  notes?: string;
+  updatedAt?: string;
 }
 
-export type DealStatus = 'locked' | 'in-progress' | 'pending' | 'completed' | 'on-hold' | 'cancelled';
+export type BrandPaymentStatus = 'Pending' | 'Partially Paid' | 'Paid';
+export type CreatorUploadingStatus = 'Pending' | 'Uploaded';
+export type CreatorPaymentStatus = 'Pending' | 'Partially Paid' | 'Paid';
 
-export interface BrandDeal {
+export interface CreatorRecord {
+  id: string;
+  creatorName: string;
+  lockingAmount: number; // Locking amount or agreed deal amount (₹)
+  payoutAmount: number; // Creator payout amount (₹)
+  uploadingStatus: CreatorUploadingStatus; // 'Pending' | 'Uploaded'
+  paymentStatus: CreatorPaymentStatus; // 'Pending' | 'Partially Paid' | 'Paid'
+  amountPaid: number; // Amount paid to the creator (₹)
+}
+
+export interface BrandDealRecord {
   id: string;
   brandName: string;
-  campaignName: string;
-  dealValue: number; // Agreed contract value (₹)
-  brandRevenueReceived: number; // Actual recognized revenue received (₹)
-  outstandingPayments: number; // dealValue - brandRevenueReceived (₹)
-  creatorPayments: number; // Expenses to creators (₹)
-  additionalExpenses: number; // Logistics, tools, taxes (₹)
-  totalExpenses: number; // creatorPayments + additionalExpenses
-  netProfit: number; // brandRevenueReceived - totalExpenses
-  profitMargin: number; // (netProfit / brandRevenueReceived) * 100
-  creatorsLocked: number;
-  creatorsCompleted: number;
-  creatorsPending: number;
-  creatorsDeclined: number;
-  deadline: string; // YYYY-MM-DD
-  status: DealStatus;
-  notes: string;
-  weekId?: string; // e.g. 2026-W43
-  createdAt: string;
-  updatedAt: string;
+  dealDate: string; // YYYY-MM-DD
+  totalDealAmount: number; // Total deal amount agreed with the brand (₹)
+  amountReceived: number; // Amount received from the brand (₹)
+  paymentStatus: BrandPaymentStatus; // 'Pending' | 'Partially Paid' | 'Paid'
+  creators: CreatorRecord[]; // Multiple creators associated with the brand
+  notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-export interface WeeklyTarget {
-  id: string; // e.g. 2026-W43
-  year: number;
-  weekNumber: number;
-  startDate: string; // YYYY-MM-DD
-  endDate: string; // YYYY-MM-DD
-  targetRevenue: number;
-  targetProfit: number;
-  targetCreatorsLocked: number;
-  targetDeliverables: number;
-  notes: string;
-  setBy: string;
-  updatedAt: string;
+export interface ExpenseRecord {
+  id: string;
+  date: string; // YYYY-MM-DD
+  description: string;
+  amount: number; // (₹)
+  createdAt?: string;
 }
 
 export interface AppDatabase {
-  dailyWork: Record<string, DailyWorkEntry>;
-  deals: BrandDeal[];
-  weeklyTargets: Record<string, WeeklyTarget>;
+  performance: Record<string, PerformanceDayEntry>;
+  brandDeals: BrandDealRecord[];
+  expenses: ExpenseRecord[];
 }

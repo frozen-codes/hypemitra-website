@@ -1,21 +1,21 @@
-import { AppDatabase, BrandDeal, DailyWorkEntry, User, WeeklyTarget } from '../types';
-import { INITIAL_DAILY_WORK, INITIAL_DEALS, INITIAL_WEEKLY_TARGETS } from '../data/initialData';
+import {
+  AppDatabase,
+  BrandDealRecord,
+  ExpenseRecord,
+  PerformanceDayEntry,
+} from '../types';
+import {
+  INITIAL_PERFORMANCE,
+  INITIAL_BRAND_DEALS,
+  INITIAL_EXPENSES,
+} from '../data/initialData';
 
-const LOCAL_STORAGE_KEY = 'agency_worktrack_db_v1';
-const CURRENT_USER_KEY = 'agency_worktrack_user_v1';
-const SYNC_QUEUE_KEY = 'agency_worktrack_sync_queue_v1';
-
-export type SyncItemType =
-  | 'save-daily-work'
-  | 'submit-review'
-  | 'save-deal'
-  | 'delete-deal'
-  | 'save-weekly-target'
-  | 'update-profile';
+const LOCAL_STORAGE_KEY = 'creator_performance_finance_db_v3';
+const SYNC_QUEUE_KEY = 'creator_finance_sync_queue_v3';
 
 export interface SyncQueueItem {
   id: string;
-  type: SyncItemType;
+  type: 'save-performance' | 'save-brand-deal' | 'delete-brand-deal' | 'save-expense' | 'delete-expense';
   payload: any;
   timestamp: number;
 }
@@ -40,7 +40,7 @@ export function getSyncQueue(): SyncQueueItem[] {
     const raw = localStorage.getItem(SYNC_QUEUE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) {
-    console.warn('Error reading sync queue from localStorage:', e);
+    console.warn('Error reading sync queue:', e);
   }
   return [];
 }
@@ -49,39 +49,36 @@ export function saveSyncQueue(queue: SyncQueueItem[]) {
   try {
     localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
   } catch (e) {
-    console.warn('Error writing sync queue to localStorage:', e);
+    console.warn('Error saving sync queue:', e);
   }
   notifySyncListeners();
 }
 
-export function addToSyncQueue(type: SyncItemType, payload: any) {
+export function addToSyncQueue(type: SyncQueueItem['type'], payload: any) {
   const queue = getSyncQueue();
-  // If editing same deal or same day's work, replace previous pending item with latest
   const filtered = queue.filter((item) => {
-    if (type === 'save-daily-work' && item.type === 'save-daily-work') {
+    if (type === 'save-performance' && item.type === 'save-performance') {
       return item.payload.date !== payload.date;
     }
-    if (type === 'save-deal' && item.type === 'save-deal') {
+    if (type === 'save-brand-deal' && item.type === 'save-brand-deal') {
       return item.payload.id !== payload.id;
     }
-    if (type === 'save-weekly-target' && item.type === 'save-weekly-target') {
+    if (type === 'save-expense' && item.type === 'save-expense') {
       return item.payload.id !== payload.id;
     }
     return true;
   });
 
-  const newItem: SyncQueueItem = {
-    id: `sync-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+  filtered.push({
+    id: `sync-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
     type,
     payload,
     timestamp: Date.now(),
-  };
-
-  filtered.push(newItem);
+  });
   saveSyncQueue(filtered);
 }
 
-function getLocalFallback(): AppDatabase {
+function getLocalDatabase(): AppDatabase {
   try {
     const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
@@ -89,13 +86,13 @@ function getLocalFallback(): AppDatabase {
     console.warn('LocalStorage read error:', e);
   }
   return {
-    dailyWork: INITIAL_DAILY_WORK,
-    deals: INITIAL_DEALS,
-    weeklyTargets: INITIAL_WEEKLY_TARGETS,
+    performance: INITIAL_PERFORMANCE,
+    brandDeals: INITIAL_BRAND_DEALS,
+    expenses: INITIAL_EXPENSES,
   };
 }
 
-function saveLocalFallback(data: AppDatabase) {
+function saveLocalDatabase(data: AppDatabase) {
   try {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
   } catch (e) {
@@ -116,151 +113,32 @@ export const api = {
     return getSyncQueue().length;
   },
 
-  getStoredUser(): User | null {
-    try {
-      const raw = localStorage.getItem(CURRENT_USER_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch {
-      // ignore
-    }
-    return null;
-  },
-
-  setStoredUser(user: User | null) {
-    if (user) {
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
-    } else {
-      localStorage.removeItem(CURRENT_USER_KEY);
-    }
-  },
-
-  async login(email: string, password: string): Promise<{ user: User; token: string }> {
+  async fetchDatabase(): Promise<AppDatabase> {
     try {
       if (navigator.onLine) {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
+        const res = await fetch('/api/data');
         if (res.ok) {
-          const data = await res.json();
-          api.setStoredUser(data.user);
+          const data: AppDatabase = await res.json();
+          saveLocalDatabase(data);
+          // Process any pending offline items
+          this.flushSyncQueue().catch((e) => console.warn('Flush sync queue failed:', e));
           return data;
         }
       }
-    } catch (err: any) {
-      console.warn('Login fetch failed, checking offline credentials:', err);
+    } catch (err) {
+      console.warn('API fetchDatabase failed, returning local cache:', err);
     }
-
-    // Fallback for offline mode and standalone client-side execution
-    const stored = api.getStoredUser();
-    if (stored && stored.email.toLowerCase() === email.toLowerCase()) {
-      return { user: stored, token: 'local-offline-token' };
-    }
-
-    if (email.toLowerCase().includes('hr') && password === 'hr123') {
-      const hrUser: User = {
-        id: 'user-hr',
-        name: 'Shraddha Tiwari',
-        email: 'hr@hypemitra.com',
-        role: 'hr',
-        avatar: '/src/assets/images/avatar_hr_sarah_1792391437426.jpg',
-        title: 'HR & Operations Lead',
-      };
-      api.setStoredUser(hrUser);
-      return { user: hrUser, token: 'local-hr-token' };
-    } else if (email.toLowerCase().includes('senior') && password === 'senior123') {
-      const seniorUser: User = {
-        id: 'user-senior',
-        name: 'David Vance',
-        email: 'senior@agency.com',
-        role: 'senior',
-        avatar: '/src/assets/images/avatar_senior_david_1792391436855.jpg',
-        title: 'Senior Operations Director',
-      };
-      api.setStoredUser(seniorUser);
-      return { user: seniorUser, token: 'local-senior-token' };
-    }
-    throw new Error('Invalid email or password');
+    return getLocalDatabase();
   },
 
-  async updateProfile(profileData: {
-    id: string;
-    name: string;
-    title: string;
-    email: string;
-    avatar: string;
-    newPassword?: string;
-  }): Promise<User> {
-    const updatedUser: User = {
-      id: profileData.id,
-      name: profileData.name,
-      title: profileData.title,
-      email: profileData.email,
-      role: profileData.id === 'user-hr' ? 'hr' : 'senior',
-      avatar: profileData.avatar,
-    };
-
-    api.setStoredUser(updatedUser);
+  async savePerformance(entry: PerformanceDayEntry): Promise<PerformanceDayEntry> {
+    const current = getLocalDatabase();
+    current.performance[entry.date] = entry;
+    saveLocalDatabase(current);
 
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/auth/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(profileData),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          api.setStoredUser(data.user);
-          return data.user;
-        }
-      } catch (e) {
-        console.warn('API updateProfile failed, queuing for sync:', e);
-        addToSyncQueue('update-profile', profileData);
-      }
-    } else {
-      addToSyncQueue('update-profile', profileData);
-    }
-
-    return updatedUser;
-  },
-
-  async fetchDatabase(): Promise<AppDatabase> {
-    if (navigator.onLine) {
-      try {
-        const res = await fetch('/api/data');
-        if (res.ok) {
-          const serverDb: AppDatabase = await res.json();
-          // If we have pending offline items in the sync queue, trigger background sync
-          const queue = getSyncQueue();
-          if (queue.length > 0) {
-            // Trigger sync in background
-            setTimeout(() => {
-              api.syncPendingQueue();
-            }, 100);
-            return getLocalFallback();
-          }
-          saveLocalFallback(serverDb);
-          return serverDb;
-        }
-      } catch (e) {
-        console.warn('API fetchDatabase failed, using cached offline data:', e);
-      }
-    }
-    return getLocalFallback();
-  },
-
-  async saveDailyWork(entry: DailyWorkEntry): Promise<DailyWorkEntry> {
-    // 1. Immediately persist to local storage for instant responsiveness
-    const current = getLocalFallback();
-    current.dailyWork[entry.date] = entry;
-    saveLocalFallback(current);
-
-    // 2. If online, try sending to server
-    if (navigator.onLine) {
-      try {
-        const res = await fetch('/api/daily-work', {
+        const res = await fetch('/api/performance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(entry),
@@ -269,287 +147,199 @@ export const api = {
           const json = await res.json();
           return json.entry;
         }
-      } catch (e) {
-        console.warn('API saveDailyWork failed, queued for offline sync:', e);
-        addToSyncQueue('save-daily-work', entry);
+      } catch (err) {
+        console.warn('Network savePerformance failed, queued for sync:', err);
+        addToSyncQueue('save-performance', entry);
       }
     } else {
-      addToSyncQueue('save-daily-work', entry);
+      addToSyncQueue('save-performance', entry);
     }
-
     return entry;
   },
 
-  async submitSeniorReview(
-    date: string,
-    feedback: string,
-    status: 'approved' | 'action_required' | 'acknowledged',
-    reviewerName: string
-  ): Promise<DailyWorkEntry> {
-    const current = getLocalFallback();
-    const entry = current.dailyWork[date] || {
-      date,
-      tasksCompleted: [],
-      tasksPending: [],
-      notes: '',
-      creatorsContacted: 0,
-      creatorsLocked: 0,
-      deliverablesCompleted: 0,
-      performanceRating: 'yellow',
-      dealsHandled: [],
-      submittedBy: 'HR',
-      submittedAt: new Date().toISOString(),
-    };
-    entry.seniorReview = {
-      reviewed: true,
-      reviewedBy: reviewerName,
-      reviewedAt: new Date().toISOString(),
-      feedback,
-      status,
-    };
-    current.dailyWork[date] = entry;
-    saveLocalFallback(current);
-
-    if (navigator.onLine) {
-      try {
-        const res = await fetch('/api/daily-work/review', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ date, feedback, status, reviewerName }),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          return json.entry;
-        }
-      } catch (e) {
-        console.warn('API submitSeniorReview failed, queued for offline sync:', e);
-        addToSyncQueue('submit-review', { date, feedback, status, reviewerName });
-      }
-    } else {
-      addToSyncQueue('submit-review', { date, feedback, status, reviewerName });
-    }
-
-    return entry;
-  },
-
-  async saveDeal(deal: Partial<BrandDeal>): Promise<BrandDeal> {
-    const current = getLocalFallback();
-    const dealValue = Number(deal.dealValue) || 0;
-    const brandRevenueReceived = Number(deal.brandRevenueReceived) || 0;
-    const outstandingPayments = Math.max(0, dealValue - brandRevenueReceived);
-    const creatorPayments = Number(deal.creatorPayments) || 0;
-    const additionalExpenses = Number(deal.additionalExpenses) || 0;
-    const totalExpenses = creatorPayments + additionalExpenses;
-    const netProfit = brandRevenueReceived - totalExpenses;
-    const profitMargin =
-      brandRevenueReceived > 0
-        ? Math.round((netProfit / brandRevenueReceived) * 100 * 100) / 100
-        : 0;
-
-    const saved: BrandDeal = {
-      id: deal.id || `deal-${Date.now()}`,
+  async saveBrandDeal(deal: Partial<BrandDealRecord>): Promise<BrandDealRecord> {
+    const current = getLocalDatabase();
+    const id = deal.id || `deal-${Date.now()}`;
+    const fullDeal: BrandDealRecord = {
+      id,
       brandName: deal.brandName || 'Untitled Brand',
-      campaignName: deal.campaignName || 'Campaign',
-      dealValue,
-      brandRevenueReceived,
-      outstandingPayments,
-      creatorPayments,
-      additionalExpenses,
-      totalExpenses,
-      netProfit,
-      profitMargin,
-      creatorsLocked: Number(deal.creatorsLocked) || 0,
-      creatorsCompleted: Number(deal.creatorsCompleted) || 0,
-      creatorsPending: Number(deal.creatorsPending) || 0,
-      creatorsDeclined: Number(deal.creatorsDeclined) || 0,
-      deadline: deal.deadline || new Date().toISOString().split('T')[0],
-      status: deal.status || 'in-progress',
+      dealDate: deal.dealDate || new Date().toISOString().split('T')[0],
+      totalDealAmount: Math.max(0, Number(deal.totalDealAmount) || 0),
+      amountReceived: Math.max(0, Number(deal.amountReceived) || 0),
+      paymentStatus: deal.paymentStatus || 'Pending',
+      creators: Array.isArray(deal.creators) ? deal.creators : [],
       notes: deal.notes || '',
       createdAt: deal.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    const idx = current.deals.findIndex((d) => d.id === saved.id);
-    if (idx >= 0) {
-      current.deals[idx] = saved;
+    const index = current.brandDeals.findIndex((d) => d.id === id);
+    if (index >= 0) {
+      current.brandDeals[index] = fullDeal;
     } else {
-      current.deals.unshift(saved);
+      current.brandDeals.unshift(fullDeal);
     }
-    saveLocalFallback(current);
+    saveLocalDatabase(current);
 
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/deals', {
+        const res = await fetch('/api/brand-deals', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(deal),
+          body: JSON.stringify(fullDeal),
         });
         if (res.ok) {
           const json = await res.json();
           return json.deal;
         }
-      } catch (e) {
-        console.warn('API saveDeal failed, queued for offline sync:', e);
-        addToSyncQueue('save-deal', saved);
+      } catch (err) {
+        console.warn('Network saveBrandDeal failed, queued for sync:', err);
+        addToSyncQueue('save-brand-deal', fullDeal);
       }
     } else {
-      addToSyncQueue('save-deal', saved);
+      addToSyncQueue('save-brand-deal', fullDeal);
     }
-
-    return saved;
+    return fullDeal;
   },
 
-  async deleteDeal(dealId: string): Promise<boolean> {
-    const current = getLocalFallback();
-    current.deals = current.deals.filter((d) => d.id !== dealId);
-    saveLocalFallback(current);
+  async deleteBrandDeal(id: string): Promise<void> {
+    const current = getLocalDatabase();
+    current.brandDeals = current.brandDeals.filter((d) => d.id !== id);
+    saveLocalDatabase(current);
 
     if (navigator.onLine) {
       try {
-        const res = await fetch(`/api/deals/${dealId}`, { method: 'DELETE' });
-        if (res.ok) return true;
-      } catch (e) {
-        console.warn('API deleteDeal failed, queued for offline sync:', e);
-        addToSyncQueue('delete-deal', { dealId });
+        await fetch(`/api/brand-deals/${id}`, { method: 'DELETE' });
+      } catch (err) {
+        console.warn('Network deleteBrandDeal failed, queued for sync:', err);
+        addToSyncQueue('delete-brand-deal', { id });
       }
     } else {
-      addToSyncQueue('delete-deal', { dealId });
+      addToSyncQueue('delete-brand-deal', { id });
     }
-
-    return true;
   },
 
-  async saveWeeklyTarget(target: WeeklyTarget): Promise<WeeklyTarget> {
-    const current = getLocalFallback();
-    current.weeklyTargets[target.id] = target;
-    saveLocalFallback(current);
+  async saveExpense(expense: Partial<ExpenseRecord>): Promise<ExpenseRecord> {
+    const current = getLocalDatabase();
+    const id = expense.id || `exp-${Date.now()}`;
+    const fullExpense: ExpenseRecord = {
+      id,
+      date: expense.date || new Date().toISOString().split('T')[0],
+      description: expense.description || 'General Expense',
+      amount: Math.max(0, Number(expense.amount) || 0),
+      createdAt: expense.createdAt || new Date().toISOString(),
+    };
+
+    const index = current.expenses.findIndex((e) => e.id === id);
+    if (index >= 0) {
+      current.expenses[index] = fullExpense;
+    } else {
+      current.expenses.unshift(fullExpense);
+    }
+    saveLocalDatabase(current);
 
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/weekly-targets', {
+        const res = await fetch('/api/expenses', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target),
+          body: JSON.stringify(fullExpense),
         });
         if (res.ok) {
           const json = await res.json();
-          return json.target;
+          return json.expense;
         }
-      } catch (e) {
-        console.warn('API saveWeeklyTarget failed, queued for offline sync:', e);
-        addToSyncQueue('save-weekly-target', target);
+      } catch (err) {
+        console.warn('Network saveExpense failed, queued for sync:', err);
+        addToSyncQueue('save-expense', fullExpense);
       }
     } else {
-      addToSyncQueue('save-weekly-target', target);
+      addToSyncQueue('save-expense', fullExpense);
     }
-
-    return target;
+    return fullExpense;
   },
 
-  async resetData(): Promise<AppDatabase> {
-    const resetDb: AppDatabase = {
-      dailyWork: INITIAL_DAILY_WORK,
-      deals: INITIAL_DEALS,
-      weeklyTargets: INITIAL_WEEKLY_TARGETS,
-    };
-    saveLocalFallback(resetDb);
-    saveSyncQueue([]);
+  async deleteExpense(id: string): Promise<void> {
+    const current = getLocalDatabase();
+    current.expenses = current.expenses.filter((e) => e.id !== id);
+    saveLocalDatabase(current);
 
     if (navigator.onLine) {
       try {
-        const res = await fetch('/api/reset-data', { method: 'POST' });
-        if (res.ok) {
-          const json = await res.json();
-          saveLocalFallback(json.db);
-          return json.db;
-        }
-      } catch (e) {
-        console.warn('API resetData server sync failed:', e);
+        await fetch(`/api/expenses/${id}`, { method: 'DELETE' });
+      } catch (err) {
+        console.warn('Network deleteExpense failed, queued for sync:', err);
+        addToSyncQueue('delete-expense', { id });
       }
+    } else {
+      addToSyncQueue('delete-expense', { id });
     }
-
-    return resetDb;
   },
 
-  async syncPendingQueue(): Promise<{ synced: number; failed: number }> {
-    if (!navigator.onLine || isCurrentlySyncing) {
-      return { synced: 0, failed: 0 };
+  async resetData(): Promise<AppDatabase> {
+    const initial: AppDatabase = {
+      performance: INITIAL_PERFORMANCE,
+      brandDeals: INITIAL_BRAND_DEALS,
+      expenses: INITIAL_EXPENSES,
+    };
+    saveLocalDatabase(initial);
+    try {
+      if (navigator.onLine) {
+        await fetch('/api/reset-data', { method: 'POST' });
+      }
+    } catch (e) {
+      console.warn('Server reset failed:', e);
     }
+    return initial;
+  },
 
+  async syncPendingQueue(): Promise<void> {
+    return this.flushSyncQueue();
+  },
+
+  async flushSyncQueue(): Promise<void> {
+    if (!navigator.onLine || isCurrentlySyncing) return;
     const queue = getSyncQueue();
-    if (queue.length === 0) {
-      return { synced: 0, failed: 0 };
-    }
+    if (queue.length === 0) return;
 
     isCurrentlySyncing = true;
     notifySyncListeners();
 
-    let synced = 0;
-    let failed = 0;
     const remainingQueue: SyncQueueItem[] = [];
 
     for (const item of queue) {
       try {
-        if (item.type === 'save-daily-work') {
-          const res = await fetch('/api/daily-work', {
+        if (item.type === 'save-performance') {
+          await fetch('/api/performance', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item.payload),
           });
-          if (!res.ok) throw new Error('Failed to sync daily work');
-        } else if (item.type === 'submit-review') {
-          const res = await fetch('/api/daily-work/review', {
+        } else if (item.type === 'save-brand-deal') {
+          await fetch('/api/brand-deals', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item.payload),
           });
-          if (!res.ok) throw new Error('Failed to sync review');
-        } else if (item.type === 'save-deal') {
-          const res = await fetch('/api/deals', {
+        } else if (item.type === 'delete-brand-deal') {
+          await fetch(`/api/brand-deals/${item.payload.id}`, { method: 'DELETE' });
+        } else if (item.type === 'save-expense') {
+          await fetch('/api/expenses', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(item.payload),
           });
-          if (!res.ok) throw new Error('Failed to sync deal');
-        } else if (item.type === 'delete-deal') {
-          const res = await fetch(`/api/deals/${item.payload.dealId}`, {
-            method: 'DELETE',
-          });
-          if (!res.ok) throw new Error('Failed to delete deal');
-        } else if (item.type === 'save-weekly-target') {
-          const res = await fetch('/api/weekly-targets', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item.payload),
-          });
-          if (!res.ok) throw new Error('Failed to sync target');
-        } else if (item.type === 'update-profile') {
-          const res = await fetch('/api/auth/profile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(item.payload),
-          });
-          if (!res.ok) throw new Error('Failed to sync profile');
+        } else if (item.type === 'delete-expense') {
+          await fetch(`/api/expenses/${item.payload.id}`, { method: 'DELETE' });
         }
-        synced++;
       } catch (err) {
-        console.warn('Failed syncing queue item:', item, err);
-        failed++;
+        console.warn(`Sync item ${item.id} failed, retaining in queue:`, err);
         remainingQueue.push(item);
       }
     }
 
-    isCurrentlySyncing = false;
     saveSyncQueue(remainingQueue);
-
-    return { synced, failed };
+    isCurrentlySyncing = false;
+    notifySyncListeners();
   },
 };
-
-// Automatic listener when internet returns
-if (typeof window !== 'undefined') {
-  window.addEventListener('online', () => {
-    console.log('App is back online. Syncing pending offline modifications...');
-    api.syncPendingQueue();
-  });
-}
